@@ -1,0 +1,124 @@
+# configs/connect.yaml
+input:
+  generate:
+    count: 1
+    mapping: |
+      root = {}
+      root.txn_id = uuid_v4()
+      root.product_id = "B07GVGTSLN"
+      root.product_name = "Samsung Galaxy S10E"
+      root.category = "Electronics"
+      root.discounted_price = "₹1,299"
+      root.actual_price = "₹1,299"
+      root.about_product = fake("paragraph")
+      root.user_id = "AEXK37TSBFHSP2TYE63YPKETWQ7Q"
+      root.user_name = "Asad Hasan"  # Updated name
+pipeline:
+  processors:
+    - branch:
+        processors:
+          - ollama_embeddings:
+              model: mxbai-embed-large
+              text: |
+                Represent this sentence for searching relevant passages:
+                User ${!this.user_name} bought a product called ${!this.product_name}, 
+                which has the category ${!this.category} for ${!this.discounted_price}. 
+                The product description is ${!this.about_product}
+        result_map: |
+          root.query_embedding = this
+    - branch:
+        processors:
+          - sql_raw:
+              driver: "clickhouse"
+              dsn: clickhouse://localhost:9000
+              query: |
+                SELECT * FROM sales 
+                WHERE product_id != $1 AND user_id != $2
+                ORDER BY cosineDistance($3, text_embedding)
+                LIMIT 3
+              args_mapping: root = [ this.product_id, this.user_id, this.query_embedding ]
+        result_map: |
+          root.similar_products = this
+    - branch:
+        processors:
+        - ollama_chat:
+            model: llama3.2
+            max_tokens: 150
+            prompt: |
+              Your task is to generate a single email subject (nothing else)
+              for a customer who just bought a product called ${!this.product_name}
+              and is receiving a followup to entice them to come back to the store.
+            save_prompt_metadata: true
+        - ollama_moderation:
+            model: llama-guard3
+            prompt: "${!@prompt}"
+            response: "${!content()}"
+        result_map: |
+          root.email.subject = content().string()
+          root.email.subject_is_safe = @safe
+    - branch:
+        processors:
+        - ollama_chat:
+            model: llama3.2
+            prompt: |
+              A customer named ${!this.user_name} just bought a product called ${!this.product_name}.
+              Here are some similar products that other customers have recently bought:
+              ${!this.similar_products.map_each(
+                    product -> [product.product_name, product.about_product].join(" ")
+                  ).join("\n")}
+              Your task is to write a followup marketing email (the body only, no subject) to ${!this.user_name}
+              from TechMart (use the company name for the signature) that will thank them for their purchase
+              and give recommendations for them to come back based on the above similar products.
+              Keep the tone professional but friendly.
+            save_prompt_metadata: true
+        - ollama_moderation:
+            model: llama-guard3
+            prompt: "${!@prompt}"
+            response: "${!content()}"
+        result_map: |
+          root.email.body = content().string()
+          root.email.body_is_safe = @safe
+output:
+  broker:
+    outputs:
+      - http_client:
+          url: "https://api.mailslurp.com/emails"
+          headers:
+            Content-Type: application/json
+            x-api-key: "${API_KEY}"
+        processors:
+          - mapping: |
+              root.to = ["Test <test@mailslurp.com>"]
+              root.from = "TechMart <notifications@techmart.com>"
+              root.subject = this.email.subject.unquote().catch(this.email.subject)
+              root.body = this.email.body
+              root = if this.email.body_is_safe == "no" || this.email.subject_is_safe == "no" {
+                deleted()
+              }
+      - sql_insert:
+          driver: "clickhouse"
+          dsn: clickhouse://localhost:9000
+          table: llm_emails
+          init_statement: |
+            CREATE TABLE IF NOT EXISTS llm_emails (
+              txn_id TEXT,
+              subject TEXT,
+              subject_safe TEXT,
+              body TEXT,
+              body_safe TEXT
+            ) ENGINE = MergeTree()
+              ORDER BY txn_id;
+          columns:
+            - txn_id
+            - subject
+            - subject_safe
+            - body
+            - body_safe
+          args_mapping: |
+            root = [
+              this.txn_id,
+              this.email.subject,
+              this.email.subject_is_safe,
+              this.email.body,
+              this.email.body_is_safe,
+            ]

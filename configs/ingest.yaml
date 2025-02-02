@@ -1,0 +1,83 @@
+input:
+  file:
+    paths: ["./data/amazon.csv"]
+    scanner:
+      csv: {}
+pipeline:
+  processors:
+    - branch:
+        processors:
+          - ollama_embeddings:
+              model: mxbai-embed-large
+              text: |
+                User ${!this.user_name} bought a product called ${!this.product_name},
+                which has the category ${!this.category} for ${!this.discounted_price}. 
+                The product description is ${!this.about_product}
+                They gave a review: ${!this.review_content}
+        result_map: |
+          root.text_embedding = this
+output:
+  sql_insert:
+    driver: "clickhouse"
+    dsn: clickhouse://localhost:9000
+    init_statement: |
+      CREATE TABLE IF NOT EXISTS sales (
+        txn_id TEXT,
+        product_id TEXT,
+        product_name TEXT,
+        category TEXT,
+        discounted_price TEXT,
+        actual_price TEXT,
+        dicount_percentage TEXT,
+        rating TEXT,
+        rating_count TEXT,
+        about_product TEXT,
+        user_id TEXT,
+        user_name TEXT,
+        review_title TEXT,
+        review_content TEXT,
+        img_link TEXT,
+        product_link TEXT,
+        text_embedding Array(Float32)
+      ) ENGINE = MergeTree()
+        ORDER BY txn_id
+        PRIMARY KEY txn_id
+    table: sales
+    columns:
+      - txn_id
+      - product_id
+      - product_name
+      - category
+      - discounted_price
+      - actual_price
+      - dicount_percentage
+      - rating
+      - rating_count
+      - about_product
+      - user_id
+      - user_name
+      - review_title
+      - review_content
+      - img_link
+      - product_link
+      - text_embedding
+    args_mapping: |
+      root = [
+        this.review_id,
+        this.product_id,
+        this.product_name,
+        this.category,
+        this.discounted_price,
+        this.actual_price,
+        this.dicount_percentage,
+        this.rating,
+        this.rating_count,
+        this.about_product,
+        this.user_id,
+        this.user_name,
+        this.review_title,
+        this.review_content,
+        this.img_link,
+        this.product_link,
+        this.text_embedding,
+      ]

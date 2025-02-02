@@ -1,0 +1,43 @@
+# Dependencies
+/node_modules
+/vendor
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+log/
+
+# Build output
+/dist
+/build
+/out
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache directories
+.cache/
+tmp/
+temp/
+
+# Configuration files with sensitive data
+config.*.yaml
+!config.example.yaml
+
+# System Files
+.DS_Store
+Thumbs.db

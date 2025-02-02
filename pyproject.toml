@@ -1,0 +1,11 @@
+[project]
+name = "redpanda-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "clickhouse-driver>=0.2.9",
+    "kaggle>=1.6.17",
+    "python-dotenv>=1.0.1",
+]

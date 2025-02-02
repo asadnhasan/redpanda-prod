@@ -1,0 +1,7 @@
+README.md
+pyproject.toml
+redpanda_project.egg-info/PKG-INFO
+redpanda_project.egg-info/SOURCES.txt
+redpanda_project.egg-info/dependency_links.txt
+redpanda_project.egg-info/requires.txt
+redpanda_project.egg-info/top_level.txt

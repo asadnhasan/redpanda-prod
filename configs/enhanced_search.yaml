@@ -1,0 +1,72 @@
+input:
+  generate:
+    count: 1
+    interval: ""
+    mapping: |
+      root = {
+        "query": env("SEARCH_QUERY")
+      }
+
+pipeline:
+  processors:
+    - branch:
+        processors:
+          - ollama_embeddings:
+              model: mxbai-embed-large
+              text: ${!this.query}
+        result_map: |
+          root.query_embedding = this
+    - branch:
+        processors:
+          - sql_raw:
+              driver: "clickhouse"
+              dsn: clickhouse://localhost:9000
+              query: |
+                SELECT 
+                    product_name,
+                    category,
+                    discounted_price,
+                    actual_price,
+                    about_product,
+                    rating,
+                    1 - cosineDistance($1, text_embedding) as relevance_score
+                FROM sales 
+                WHERE 1 - cosineDistance($1, text_embedding) > 0.6
+                ORDER BY relevance_score DESC
+                LIMIT 5
+              args_mapping: |
+                root = [ this.query_embedding ]
+        result_map: |
+          root.search_results = this
+    - branch:
+        processors:
+        - ollama_chat:
+            model: llama3.2
+            prompt: |
+              You are a helpful shopping assistant. Based on the user's search query: "${!this.query}"
+              
+              Here are the top relevant products found:
+              ${!this.search_results.map_each(
+                product -> [
+                  "- " + product.product_name,
+                  "  Price: " + product.discounted_price + " (Original: " + product.actual_price + ")",
+                  "  Category: " + product.category,
+                  "  Rating: " + product.rating,
+                  "  Relevance Score: " + (product.relevance_score * 100).number().round() + "%"
+                ].join("\n")
+              ).join("\n\n")}
+              
+              Provide a concise summary of the search results that includes:
+              1. A brief overview of what was found
+              2. Price range of the options
+              3. Key features or highlights
+              4. Best value recommendation
+              5. Premium option recommendation (if applicable)
+              
+              Format the response in a clear, easy-to-read way with appropriate sections.
+            save_prompt_metadata: true
+        result_map: |
+          root.summary = content()
+
+output:
+  stdout: {}
